@@ -18,6 +18,7 @@ use crazyflie_lib::Value;
 use anyhow::{bail, Result};
 
 pub mod error;
+mod lifecycle;
 
 pub mod modules {
     pub mod log;
@@ -603,6 +604,12 @@ async fn run() -> Result<()> {
     let timeout_ms = args.timeout;
     let non_interactive = args.non_interactive || !std::io::stdin().is_terminal();
     let csv = args.csv;
+
+    let interruption = if matches!(&args.command, Commands::Console { source: Some(_), .. }) {
+        Some(lifecycle::interruption()?)
+    } else {
+        None
+    };
 
     let body = async {
     match &args.command {
@@ -1625,35 +1632,31 @@ async fn run() -> Result<()> {
     Ok(())
     };
 
-    let result: Result<()> = if let Some(ms) = timeout_ms {
-        let deadline = std::time::Duration::from_millis(ms);
-        match tokio::time::timeout(deadline, body).await {
-            Ok(r) => r,
-            Err(_) => {
-                if is_streaming_command(&args.command) {
-                    Ok(())
-                } else {
-                    Err(CliError::Timeout(format!("command did not complete within {} ms", ms)).into())
-                }
+    let result = lifecycle::run_command(
+        body,
+        timeout_ms,
+        is_streaming_command(&args.command),
+        async {
+            match interruption {
+                Some(signal) => signal.await,
+                None => std::future::pending().await,
             }
-        }
-    } else {
-        body.await
-    };
+        },
+    ).await;
 
-    if let (Some(cf), Some(selector)) = (connected_cf.as_ref(), enabled_console_source) {
-        const SOURCE_DISABLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
-        match tokio::time::timeout(SOURCE_DISABLE_TIMEOUT, cf.console.disable(selector)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => eprintln!("Warning: could not disable console source: {}", err),
-            Err(_) => eprintln!("Warning: timed out while disabling console source"),
-        }
-    }
-
-    // Save console and disconnect any remaining connection
-    if let Some(ref cf) = connected_cf {
-        save_and_disconnect(cf, preserve_console).await;
-    }
+    lifecycle::cleanup(
+        async {
+            if let (Some(cf), Some(selector)) = (connected_cf.as_ref(), enabled_console_source) {
+                cf.console.disable(selector).await?;
+            }
+            Ok(())
+        },
+        async {
+            if let Some(ref cf) = connected_cf {
+                save_and_disconnect(cf, preserve_console).await;
+            }
+        },
+    ).await;
 
     result
 }

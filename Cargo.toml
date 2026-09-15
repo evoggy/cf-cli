@@ -73,7 +73,7 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.143"
 confy = "2.0.0"
 clap_complete = "4.5"
-tokio = "1.47.1"
+tokio = { version = "1.47.1", features = ["signal"] }
 serde_yaml = "0.9.34"
 probe-rs = "0.31.0"
 clap-num = "1.2.0"

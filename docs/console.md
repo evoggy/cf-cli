@@ -94,5 +94,10 @@ a clean disable attempt bounded to one additional second before disconnecting.
 This is the recommended pattern when running `cfcli console` from a script or
 CI step.
 
+Ctrl-C also stops a sourced console with the same bounded disable attempt
+before disconnecting, then exits with code 130. On Unix, SIGTERM follows the
+same cleanup path and exits with code 143. Interruption during source enable
+also attempts disable, since the device may already have accepted the request.
+
 `--list-sources` is bounded rather than streaming. If its global timeout
 expires, cfcli exits with timeout code 40.
